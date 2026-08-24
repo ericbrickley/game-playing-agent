@@ -81,3 +81,45 @@ def test_pyautogui_missing_reports_error(runner, monkeypatch):
     result = runner.execute_action('W')
     assert result['status'] == 'error'
     assert 'pyautogui' in result['error']
+
+
+# ---------------------------------------------------------------------------
+# Attach-to-running-game behavior (desktop launcher relies on this)
+# ---------------------------------------------------------------------------
+class FakeTasklist:
+    def __init__(self, stdout):
+        self.stdout = stdout
+        self.returncode = 0
+
+
+def test_launch_attaches_when_game_already_running(runner, monkeypatch):
+    monkeypatch.setattr('game_runner.subprocess.run',
+                        lambda *a, **k: FakeTasklist('Hades.exe    1234 Console'))
+    assert runner.launch() is True
+    assert runner._attached is True
+    assert runner.is_running is True
+    # Shutdown must NOT terminate a game we didn't start
+    runner.shutdown()
+    assert runner.is_running is False
+    assert runner._attached is False
+
+
+def test_launch_proceeds_when_game_not_running(runner, monkeypatch):
+    calls = []
+    def fake_run(*a, **k):
+        calls.append(a)
+        return FakeTasklist('INFO: No tasks are running which match')
+    monkeypatch.setattr('game_runner.subprocess.run', fake_run)
+    monkeypatch.setattr('builtins.input', lambda *a: '')  # safety net
+    # Popen would really start C:\game\hades.exe; stub it out
+    class FakePopen:
+        pid = 4242
+        def poll(self):
+            return None  # None = still running
+    monkeypatch.setattr('game_runner.subprocess.Popen',
+                        lambda *a, **k: FakePopen())
+    monkeypatch.setattr('game_runner.time.sleep', lambda s: None)
+    result = runner.launch()  # no real wait thanks to stubbed sleep
+    assert result is True
+    assert runner._attached is False
+    assert len(calls) == 1  # exactly one tasklist probe

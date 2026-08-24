@@ -27,6 +27,7 @@ class GameRunner:
         # Hades movement is continuous input; single taps barely move.
         self.move_hold_ms = float(move_hold_ms)
         self._last_exec = {}  # action name -> monotonic timestamp
+        self._attached = False  # True when we adopted an already-running game
 
     def _load_config(self, config_path):
         """Load game configuration"""
@@ -45,9 +46,30 @@ class GameRunner:
 
         return default_config
 
+    def _game_already_running(self):
+        """True if the game executable is already running (Windows tasklist).
+        Used to attach to the existing instance instead of spawning a dupe."""
+        try:
+            out = subprocess.run(
+                ['tasklist', '/FI', f'IMAGENAME eq {self.game_exe.name}'],
+                capture_output=True, text=True, timeout=10)
+            return self.game_exe.name.lower() in (out.stdout or '').lower()
+        except Exception as e:
+            logger.debug("tasklist check failed: %s", e)
+            return False
+
     def launch(self):
-        """Launch the game"""
+        """Launch the game, or attach if it is already running."""
         logger.info("Launching: %s", self.game_exe)
+
+        if self._game_already_running():
+            logger.info("Game already running - attaching instead of "
+                        "launching a second instance")
+            self._attached = True
+            self.is_running = True
+            self.pid = None
+            self.focus_window()
+            return True
 
         try:
             self.process = subprocess.Popen(
@@ -165,6 +187,14 @@ class GameRunner:
         """Shutdown the game"""
         # First release any held keys
         self.emergency_stop()
+        if self._attached:
+            logger.info("Attached to a pre-existing game instance - "
+                        "leaving it running")
+            self.process = None
+            self.pid = None
+            self.is_running = False
+            self._attached = False
+            return
         if self.process:
             try:
                 self.process.terminate()
