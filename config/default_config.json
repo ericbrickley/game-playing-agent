@@ -1,0 +1,55 @@
+{
+    "game": {
+        "title": "Hades",
+        "executable": "D:\\Games\\Hades.v1.38290\\Hades.v1.38290\\x64\\Hades.exe",
+        "window_mode": "fullscreen",
+        "resolution": "1920x1080",
+        "fps_limit": 60
+    },
+    "agent": {
+        "model": "qwen3.5-vision",
+        "max_actions_per_episode": 500,
+        "action_delay_ms": 100,
+        "observation_interval_ms": 100,
+        "move_hold_ms": 120
+    },
+    "learning": {
+        "enabled": true,
+        "buffer_size": 10000,
+        "batch_size": 32,
+        "learning_rate": 0.2,
+        "discount_factor": 0.99,
+        "epsilon_decay": 0.995,
+        "epsilon_min": 0.01,
+        "epsilon_start": 1.0
+    },
+    "rewards": {
+        "health_delta_scale": 0.1,
+        "time_penalty": -0.01,
+        "attack_hit": 0.2,
+        "combat_start": 1.0,
+        "death": -5.0,
+        "victory": 10.0,
+        "neutral": 0.0
+    },
+    "visual_analysis": {
+        "detect_health_bars": true,
+        "detect_enemies": true,
+        "detect_weapons": true,
+        "detect_boons": true,
+        "detect_ui_elements": true
+    },
+    "actions": {
+        "W": {"key": "w", "type": "movement"},
+        "A": {"key": "a", "type": "movement"},
+        "S": {"key": "s", "type": "movement"},
+        "D": {"key": "d", "type": "movement"},
+        "SPACE": {"key": "space", "type": "attack"},
+        "SHIFT": {"key": "shift", "type": "dash"},
+        "ALT": {"key": "g", "type": "skill"},
+        "TAB": {"key": "r", "type": "skill"},
+        "Q": {"key": "q", "type": "skill"},
+        "E": {"key": "e", "type": "item"},
+        "F": {"key": "f", "type": "item"}
+    }
+}

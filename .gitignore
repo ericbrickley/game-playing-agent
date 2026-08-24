@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Test / tooling caches
+.pytest_cache/
+.coverage
+
+# Generated artifacts
+experiments/experiences.jsonl
+config/agent.json
+
+# OS junk
+Thumbs.db
+.DS_Store
