@@ -103,6 +103,26 @@ def validate_config(config):
         raise ConfigError("missing or empty 'actions' section")
 
 
+def effective_rewards(config, episodes_completed):
+    """Config copy with shaping weights (attack_hit, combat_start) annealed
+    by training progress. Shaping exists to bootstrap early learning; fading
+    it lets the true objective (survival deltas) dominate later. Non-shaping
+    weights (health/time/death/victory) are never touched."""
+    learn = config.get('learning', {})
+    span = int(learn.get('shaping_anneal_episodes', 0))
+    rewards = config.get('rewards', {})
+    if span <= 0:
+        return config
+    floor = float(learn.get('shaping_floor', 0.5))
+    frac = max(floor, 1.0 - episodes_completed / span)
+    out = dict(config)
+    out['rewards'] = dict(rewards)
+    for key in ('attack_hit', 'combat_start'):
+        if key in out['rewards']:
+            out['rewards'][key] = round(out['rewards'][key] * frac, 4)
+    return out
+
+
 def get_reward(config, features, action):
     """Per-step reward. Dominant term is the health change caused by the
     action (damage taken / healing gained); attack shaping and a small time
@@ -178,14 +198,19 @@ def ensure_gameplay(game_runner, extractor, action_delay, max_steps=60):
 
 
 def run_episode(episode, game_runner, agent, config, action_delay):
-    """Run one episode; returns a metrics dict."""
-    global _is_paused, _emergency_stop_flag
-    
+    """Run one episode; returns a metrics dict.
+
+    Pipeline note: each screen capture is used twice — as next_state of the
+    current step and as the state of the following step — so learning costs
+    ~1 capture/step instead of 2. The action delay is paced against elapsed
+    step time rather than blind-slept.
+    """
     max_actions = config.get('agent', {}).get('max_actions_per_episode', 500)
     startup_settle = config.get('agent', {}).get('startup_settle_ms', 60000) / 1000.0
     extractor = get_extractor()
     encoder = get_encoder()
     extractor.reset()
+    eff_config = effective_rewards(config, agent.total_episodes)
     game_runner.focus_window()
 
     logger.info("Episode %d start", episode)
@@ -210,6 +235,12 @@ def run_episode(episode, game_runner, agent, config, action_delay):
         return {'outcome': 'no_gameplay', 'reward': 0.0, 'actions': 0,
                 'damage_taken': 0.0}
 
+    features = extractor.extract(capture_and_analyze())
+    if check_episode_end(features):
+        # Death/victory surfaced while still driving menus
+        return {'outcome': 'victory' if read_feature(features, 'scene') == 'victory'
+                else 'dead', 'reward': 0.0, 'actions': 0, 'damage_taken': 0.0}
+
     episode_reward = 0.0
     actions_taken = 0
     damage_taken = 0.0
@@ -217,38 +248,21 @@ def run_episode(episode, game_runner, agent, config, action_delay):
     outcome = 'timeout'
 
     while actions_taken < max_actions:
-        # Check for pause at each step
-        if _is_paused:
-            logger.info("Agent paused at step %d...", actions_taken)
-            _pause_event.wait()  # Block until resumed
-            logger.info("Agent resumed")
-            if _emergency_stop_flag:
-                outcome = 'aborted'
-                break
-        
-        if _emergency_stop_flag:
-            outcome = 'aborted'
-            break
-            
-        features = extractor.extract(capture_and_analyze())
-
-        if check_episode_end(features):
-            outcome = 'victory' if features.scene == 'victory' else 'dead'
-            break
-
         action = agent.select_action(features)
+        step_started = time.monotonic()
         game_runner.execute_action(action)
-        time.sleep(action_delay)
 
-        reward = get_reward(config, features, action)
-        reward += get_transition_reward(config, prev_features, features)
+        reward = get_reward(eff_config, features, action)
+        reward += get_transition_reward(eff_config, prev_features, features)
         prev_features = features
 
+        next_features = extractor.extract(capture_and_analyze())
+        time.sleep(max(0.0, action_delay - (time.monotonic() - step_started)))
+
         if agent.learning_enabled:
-            next_features = extractor.extract(capture_and_analyze())
             done = check_episode_end(next_features)
             if done:
-                reward += get_terminal_reward(config, next_features)
+                reward += get_terminal_reward(eff_config, next_features)
                 outcome = 'victory' if read_feature(next_features, 'scene') == 'victory' \
                     else 'dead'
             agent.update(features, action, reward, next_features, done=done)
@@ -261,6 +275,13 @@ def run_episode(episode, game_runner, agent, config, action_delay):
         actions_taken += 1
         logger.debug("step %d: state=%s action=%s reward=%.2f",
                      actions_taken, encoder.discretize(features), action, reward)
+
+        features = next_features
+
+        if check_episode_end(features):
+            outcome = 'victory' if read_feature(features, 'scene') == 'victory' \
+                else 'dead'
+            break
 
     logger.info("Episode %d end: outcome=%s reward=%.2f actions=%d damage=%.0f",
                 episode, outcome, episode_reward, actions_taken, damage_taken)

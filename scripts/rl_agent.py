@@ -149,6 +149,28 @@ class SimpleRLAgent:
             if self.episode_rewards[-1] > 0:
                 self.win_count += 1
             self._decay_epsilon()
+            self._replay_sweep()
+
+    def _replay_sweep(self):
+        """Off-policy replay: re-apply TD updates over sampled stored
+        transitions. Online tabular Q-learning uses each visit once; sweeps
+        propagate terminal/backward value between visits. Deliberately never
+        touches episode counters or epsilon."""
+        batches = int(self.config.get('learning', {}).get('replay_batches', 8))
+        if batches <= 0 or self.buffer is None or not self.buffer.buffer:
+            return
+        for _ in range(batches):
+            for exp in self.buffer.sample_batch(32):
+                s_row = self.policy.setdefault(
+                    get_state_key(exp['state']), {})
+                old = s_row.get(exp['action'], 0.0)
+                target = exp['reward']
+                if not exp.get('done'):
+                    n_row = self.policy.get(
+                        get_state_key(exp['next_state']), {})
+                    if n_row:
+                        target += self.gamma * max(n_row.values())
+                s_row[exp['action']] = old + self.alpha * (target - old)
 
     def _init_buffer(self):
         from experience_replay import ExperienceReplayBuffer
