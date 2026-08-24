@@ -136,10 +136,12 @@ def test_run_episode_ends_on_death(monkeypatch):
     learning_cfg['learning']['learning_rate'] = 0.5
     agent = SimpleRLAgent(learning_cfg)
     config = {
-        'agent': {'max_actions_per_episode': 10, 'action_delay_ms': 0},
+        'agent': {'max_actions_per_episode': 10, 'action_delay_ms': 0,
+                  'startup_settle_ms': 0},
         'rewards': {'neutral': 0.0, 'time_penalty': 0.0,
                     'health_delta_scale': 0.1, 'attack_hit': 0.5,
-                    'combat_start': 0.0, 'death': -5.0, 'victory': 10.0},
+                    'combat_start': 0.0, 'death': -5.0, 'victory': 10.0,
+                    'unknown_health_penalty': 0.0},
         'actions': CONFIG['actions'],
     }
     metrics = main.run_episode(1, FakeRunner(), agent, config, 0.0)
@@ -150,3 +152,60 @@ def test_run_episode_ends_on_death(monkeypatch):
 def json_deep_copy(obj):
     import json
     return json.loads(json.dumps(obj))
+
+
+# ---------------------------------------------------------------------------
+# Pause / emergency stop during gameplay
+# ---------------------------------------------------------------------------
+def test_run_episode_pauses_and_resumes(monkeypatch):
+    # Pre-set the event so _pause_event.wait() returns instantly while
+    # _is_paused is flagged: exercises the branch without hanging.
+    monkeypatch.setattr(main, '_is_paused', True)
+    monkeypatch.setattr(main, '_pause_event', type(main._pause_event)())
+    main._pause_event.set()
+
+    monkeypatch.setattr(main, 'capture_and_analyze',
+                        lambda: dict(COMBAT_RAW))
+    agent = SimpleRLAgent(CONFIG)
+    config = {
+        'agent': {'max_actions_per_episode': 2, 'action_delay_ms': 0,
+                  'startup_settle_ms': 0},
+        'rewards': {'neutral': 0.0, 'time_penalty': 0.0},
+        'actions': CONFIG['actions'],
+    }
+    metrics = main.run_episode(1, FakeRunner(), agent, config, 0.0)
+    assert metrics['outcome'] == 'timeout'
+    assert metrics['actions'] == 2
+
+
+def test_run_episode_aborts_on_emergency_stop(monkeypatch):
+    monkeypatch.setattr(main, '_emergency_stop_flag', True)
+    monkeypatch.setattr(main, 'capture_and_analyze',
+                        lambda: dict(COMBAT_RAW))
+    agent = SimpleRLAgent(CONFIG)
+    config = {
+        'agent': {'max_actions_per_episode': 5, 'action_delay_ms': 0,
+                  'startup_settle_ms': 0},
+        'rewards': {'neutral': 0.0, 'time_penalty': 0.0},
+        'actions': CONFIG['actions'],
+    }
+    metrics = main.run_episode(1, FakeRunner(), agent, config, 0.0)
+    assert metrics['outcome'] == 'aborted'
+    assert metrics['actions'] == 0
+
+
+def test_startup_settle_zero_skips_wait(monkeypatch):
+    # Guards the suite against silent 60s defaults creeping back in
+    import time as time_mod
+    monkeypatch.setattr(main, 'capture_and_analyze',
+                        lambda: dict(COMBAT_RAW))
+    agent = SimpleRLAgent(CONFIG)
+    config = {
+        'agent': {'max_actions_per_episode': 1, 'action_delay_ms': 0,
+                  'startup_settle_ms': 0},
+        'rewards': {'neutral': 0.0, 'time_penalty': 0.0},
+        'actions': CONFIG['actions'],
+    }
+    t0 = time_mod.monotonic()
+    main.run_episode(1, FakeRunner(), agent, config, 0.0)
+    assert time_mod.monotonic() - t0 < 5.0

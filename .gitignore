@@ -1,4 +1,3 @@
-```
 # Dependencies
 __pycache__/
 *.pyc
@@ -38,6 +37,3 @@ htmlcov/
 # Python cache
 __pycache__/
 *.py[cod]
-*$py.class
-*$pycache$*
-```

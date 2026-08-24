@@ -248,6 +248,21 @@ def run_episode(episode, game_runner, agent, config, action_delay):
     outcome = 'timeout'
 
     while actions_taken < max_actions:
+        # Pause support: block while paused, abort on emergency stop.
+        # Without this the F12 hotkey only froze the startup countdown,
+        # not actual gameplay.
+        if _emergency_stop_flag:
+            outcome = 'aborted'
+            break
+        if _is_paused:
+            logger.info("Episode %d paused - press %s to resume",
+                        episode, 'F12')
+            _pause_event.wait()
+            if _emergency_stop_flag:
+                outcome = 'aborted'
+                break
+            logger.info("Episode %d resumed", episode)
+
         action = agent.select_action(features)
         step_started = time.monotonic()
         game_runner.execute_action(action)
