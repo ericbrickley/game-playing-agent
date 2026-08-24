@@ -4,6 +4,7 @@ import main
 from main import (
     ConfigError,
     check_episode_end,
+    effective_rewards,
     get_reward,
     get_terminal_reward,
     get_transition_reward,
@@ -138,6 +139,35 @@ def test_check_episode_end_death_and_victory():
     assert check_episode_end({'scene': 'combat'}) is False
     assert check_episode_end({}) is False
     assert check_episode_end({'analysis': {'player_dead': True}}) is True
+
+
+# ---------------------------------------------------------------------------
+# Shaping annealing
+# ---------------------------------------------------------------------------
+def test_effective_rewards_anneals_shaping_terms(base_config):
+    base_config['learning'] = {'shaping_anneal_episodes': 10,
+                               'shaping_floor': 0.5}
+    r0 = effective_rewards(base_config, 0)['rewards']
+    r5 = effective_rewards(base_config, 5)['rewards']
+    r99 = effective_rewards(base_config, 99)['rewards']
+    assert r0['attack_hit'] == 0.5 and r0['combat_start'] == 1.0
+    assert r5['attack_hit'] == pytest.approx(0.25)
+    assert r5['combat_start'] == pytest.approx(0.5)
+    assert r99['attack_hit'] == pytest.approx(0.25)  # floored
+    # Non-shaping terms untouched
+    assert r5['death'] == -5.0 and r5['victory'] == 10.0
+
+
+def test_effective_rewards_identity_when_disabled(base_config):
+    out = effective_rewards(base_config, 500)
+    assert out is base_config  # no annealing keys -> same config object
+
+
+def test_effective_rewards_does_not_mutate_input(base_config):
+    base_config['learning'] = {'shaping_anneal_episodes': 5}
+    original = base_config['rewards']['attack_hit']
+    effective_rewards(base_config, 5)
+    assert base_config['rewards']['attack_hit'] == original
 
 
 # ---------------------------------------------------------------------------

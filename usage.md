@@ -96,6 +96,20 @@ Tune scales in `config/game_config.json → rewards`.
    raise `action_delay_ms`.
 4. Use `--mode eval --baseline random` as the sanity floor; the learned
    policy must clearly beat it on deaths avoided and damage taken.
+5. Shaping (`attack_hit`, `combat_start`) anneals to `shaping_floor` over
+   `shaping_anneal_episodes`; set the span to 0 to disable annealing.
+6. `replay_batches` controls post-episode off-policy sweeps (0 disables);
+   more batches propagate death/victory values backwards faster at slight
+   CPU cost.
+
+### Why not threads?
+
+The loop blocks on game time and perception, not on learning (a tabular TD
+update is microseconds). Each capture is reused as both next_state of step
+*t* and state of step *t+1*, so learning costs ~1 capture per step; delays
+are paced against elapsed step time. A producer/consumer architecture would
+add GIL-bound threading hazards for near-zero wall-clock gain — the VL
+refresher already covers the genuinely async part of perception.
 
 ## Python API
 

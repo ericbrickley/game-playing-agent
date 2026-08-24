@@ -76,7 +76,11 @@ def test_q_update_td_math(agent):
     assert agent.policy[get_state_key(s)]['SPACE'] == pytest.approx(0.975)
 
 
-def test_q_update_done_zeroes_bootstrap(agent):
+def test_q_update_done_zeroes_bootstrap():
+    # Isolate raw TD math: replay disabled so nothing touches Q afterwards
+    cfg = json.loads(json.dumps(CONFIG))
+    cfg['learning']['replay_batches'] = 0
+    agent = SimpleRLAgent(cfg)
     s = combat_features()
     agent.update(s, 'SHIFT', -2.0, s, True)
     assert agent.policy[get_state_key(s)]['SHIFT'] == pytest.approx(-1.0)
@@ -167,3 +171,50 @@ def test_buffer_receives_feature_states(agent):
     exp = agent.buffer.buffer[-1]
     assert exp['state']['health_pct'] == 60
     assert exp['next_state']['health_pct'] == 55
+
+
+# ---------------------------------------------------------------------------
+# Replay sweeps (off-policy updates from the buffer)
+# ---------------------------------------------------------------------------
+def replay_config(**overrides):
+    cfg = json.loads(json.dumps(CONFIG))
+    cfg['learning'].setdefault('replay_batches', 2)
+    cfg['learning'].update(overrides)
+    return SimpleRLAgent(cfg)
+
+
+def test_replay_propagates_terminal_value_backwards():
+    agent = replay_config()
+    sA = combat_features()
+    sB = dict(sA, health_pct=30)
+    sC = dict(sA, health_pct=0)
+    # Online update of sA happens before sB has any Q -> stays 0
+    agent.update(sA, 'W', 0.0, sB, False)
+    assert agent.policy[get_state_key(sA)]['W'] == 0.0
+    # Terminal reward lands on sB; done triggers the replay sweeps
+    agent.update(sB, 'SPACE', 10.0, sC, True)
+    assert agent.total_episodes == 1
+    # Online update gave alpha*10=5; sweeps push it further toward 10
+    assert agent.policy[get_state_key(sB)]['SPACE'] > 5.0
+    # Replay propagated the terminal value back through sA
+    assert agent.policy[get_state_key(sA)]['W'] > 0.0
+
+
+def test_replay_disabled_with_zero_batches():
+    agent = replay_config(replay_batches=0)
+    sA = combat_features()
+    sB = dict(sA, health_pct=30)
+    sC = dict(sA, health_pct=0)
+    agent.update(sA, 'W', 0.0, sB, False)
+    agent.update(sB, 'SPACE', 10.0, sC, True)
+    assert agent.policy[get_state_key(sA)]['W'] == 0.0
+
+
+def test_replay_does_not_touch_episode_counters():
+    agent = replay_config(replay_batches=4)
+    s = combat_features()
+    before_eps = agent._get_epsilon()
+    agent.update(s, 'W', 0.0, s, True)
+    assert agent.total_episodes == 1
+    # Only one episode's worth of decay despite many sweep updates
+    assert agent._get_epsilon() == pytest.approx(before_eps * 0.5)

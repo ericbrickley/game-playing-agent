@@ -207,3 +207,20 @@ Strictly sequential 1→26 is fine, but these can parallelize safely:
 **Remaining (outside code):** supervised live Hades sessions on the target
 machine (game install + optional VL server required); chamber-to-chamber
 navigation beyond menus is still heuristic exploration.
+
+**2026-08-23 — review response (post-push hardening):**
+- Replay sweeps: buffer was write-only; `_replay_sweep()` now runs
+  `learning.replay_batches` (default 8) off-policy TD passes over sampled
+  stored transitions after each episode — propagates terminal values
+  backwards between visits. Never touches episode counters or ε.
+- Shaping annealing: `attack_hit`/`combat_start` fade linearly to
+  `shaping_floor` (0.5) over `shaping_anneal_episodes` (150) via
+  `effective_rewards()`. Intrinsic exploration bonus declined (redundant
+  with per-episode ε decay in a tabular setting); difficulty scaling
+  declined (requires automating Hades' Pact system).
+- Loop efficiency: single-capture pipeline (each observation serves as
+  next_state of step *t* and state of step *t+1* → ~1 capture/step instead
+  of 2); action delay paced against elapsed step time. Threads declined:
+  bottleneck is game time + perception latency, not µs-cheap tabular
+  updates; rationale documented in usage.md.
+- Tests: 75 → **81 passing**.
