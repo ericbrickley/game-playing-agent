@@ -139,7 +139,7 @@ def ensure_gameplay(game_runner, extractor, action_delay, max_steps=60):
 def run_episode(episode, game_runner, agent, config, action_delay):
     """Run one episode; returns a metrics dict."""
     max_actions = config.get('agent', {}).get('max_actions_per_episode', 500)
-    startup_settle = config.get('agent', {}).get('startup_settle_ms', 3000) / 1000.0
+    startup_settle = config.get('agent', {}).get('startup_settle_ms', 60000) / 1000.0
     extractor = get_extractor()
     encoder = get_encoder()
     extractor.reset()
@@ -147,6 +147,7 @@ def run_episode(episode, game_runner, agent, config, action_delay):
 
     logger.info("Episode %d start", episode)
     # Let the game settle after launch/menu before acting
+    logger.info("Waiting %d seconds for game to fully load...", int(startup_settle))
     time.sleep(startup_settle)
     if not ensure_gameplay(game_runner, extractor, action_delay):
         logger.info("Episode %d aborted: could not reach gameplay", episode)
@@ -209,6 +210,8 @@ def main():
                         help="Eval policy baseline (default: learned Q-table)")
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug logging')
+    parser.add_argument('--emergency-key', type=str, default='ctrl+s',
+                        help="Key combo to emergency stop (default: ctrl+s)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -251,6 +254,8 @@ def main():
     logger.info("Mode: %s | Baseline: %s", args.mode, args.baseline)
     logger.info("Episodes: %d", args.episodes)
     logger.info("Learning enabled: %s", agent.learning_enabled)
+    logger.info("Emergency stop key combo: %s", args.emergency_key)
+    logger.info("Press Ctrl+C or %s to emergency stop", args.emergency_key)
     logger.info("=" * 50)
 
     if not game_runner.launch():
@@ -269,7 +274,8 @@ def main():
             agent.save()
 
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        logger.info("Interrupted by user - triggering emergency stop")
+        game_runner.emergency_stop()
         if agent.learning_enabled:
             agent.save()
     finally:

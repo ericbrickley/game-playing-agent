@@ -141,8 +141,30 @@ class GameRunner:
         except Exception as e:
             return {'action': action_name, 'status': 'error', 'error': str(e)}
 
+    def emergency_stop(self):
+        """Release all held keys immediately - breaks keyboard control lock.
+        
+        Call this when Windows Defender or other security software interferes,
+        or when the agent gets stuck sending continuous input.
+        """
+        try:
+            import pyautogui
+            # Release all possible held keys
+            for key in ['w', 'a', 's', 'd', 'space', 'shift', 'ctrl', 'alt', 'g', 'r', 'q', 'e', 'f']:
+                try:
+                    pyautogui.keyUp(key)
+                except Exception:
+                    pass
+            logger.info("Emergency stop: all keys released")
+            return True
+        except Exception as e:
+            logger.error("Emergency stop failed: %s", e)
+            return False
+
     def shutdown(self):
         """Shutdown the game"""
+        # First release any held keys
+        self.emergency_stop()
         if self.process:
             try:
                 self.process.terminate()
