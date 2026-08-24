@@ -17,3 +17,6 @@ pytest>=7.0
 
 # Optional: for game state analysis
 # torch>=2.0.0  # For future ML model integration
+
+# Keyboard control (for pause hotkey)
+keyboard>=0.13.5

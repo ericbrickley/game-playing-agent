@@ -12,8 +12,9 @@
     "action_delay_ms": 150,
     "observation_interval_ms": 100,
     "move_hold_ms": 120,
-    "startup_settle_ms": 60000,
-    "emergency_stop_keys": ["ctrl", "shift", "s"]
+    "startup_settle_ms": 15000,
+    "emergency_stop_keys": ["f12"],
+    "show_status_overlay": true
   },
   "learning": {
     "enabled": true,

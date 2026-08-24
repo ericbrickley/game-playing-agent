@@ -1,51 +1,43 @@
-```gitignore
-# Compiled and build artifacts
-*.pyc
-__pycache__/
-*.o
-*.obj
-dist/
-build/
-*.out
-
+```
 # Dependencies
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
 .venv/
 venv/
-node_modules/
-.mypy_cache/
-.pytest_cache/
-target/
-.gradle/
+env/
 
-# Logs and temp files
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
 *.log
-*.tmp
-*.swp
-*.swo
 
-# Environment
+# Environment files
 .env
 .env.local
 *.env.*
 
-# Editors
+# Editor/IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+*.tmp
 
-# Coverage
+# Coverage reports
+.coverage
 coverage/
 htmlcov/
-.coverage
 
-# System files
-.DS_Store
-Thumbs.db
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*$pycache$*
 ```
-
-Wait, let me reconsider. The modified files are only source/config files (.json, .jsonl, .py) and there are no build artifacts, dependencies, or temp files in the changes. Following rule #6:
-
-(config/game_config.json, experiments/experiences.jsonl, scripts/game_runner.py, scripts/main.py are all source/config files)
-
-Nothing should be ignored.

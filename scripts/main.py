@@ -5,6 +5,7 @@ import json
 import logging
 import statistics
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -13,12 +14,52 @@ from rl_agent import get_agent
 from state_encoder import get_encoder
 from state_features import get_extractor, read_feature, scripted_action
 from visual_state import capture_and_analyze
+from status_overlay import start_overlay, update_overlay_state, stop_overlay
 
 logger = logging.getLogger('agent.main')
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILE = PROJECT_ROOT / 'config' / 'game_config.json'
 DEFAULT_CONFIG_FILE = PROJECT_ROOT / 'config' / 'default_config.json'
+
+# Global pause control
+_pause_lock = threading.Lock()
+_is_paused = False
+_pause_event = threading.Event()
+_emergency_stop_flag = False
+
+
+def toggle_pause():
+    """Toggle pause state (called when F12 is pressed)."""
+    global _is_paused
+    with _pause_lock:
+        _is_paused = not _is_paused
+        if _is_paused:
+            _pause_event.set()
+            logger.info("Agent PAUSED - press F12 to resume")
+            update_overlay_state(paused=True)
+        else:
+            _pause_event.clear()
+            logger.info("Agent RESUMED")
+            update_overlay_state(paused=False)
+
+
+def check_emergency_stop():
+    """Check if emergency stop was triggered."""
+    return _emergency_stop_flag
+
+
+def listen_for_pause_key(key='f12'):
+    """Listen for F12 keypress to toggle pause."""
+    try:
+        import keyboard
+        keyboard.add_hotkey(key, toggle_pause)
+        logger.info("Pause hotkey registered: %s", key)
+        keyboard.wait()  # Block until interrupted
+    except ImportError:
+        logger.warning("keyboard module not available; pause via Ctrl+C only")
+    except Exception as e:
+        logger.warning("Failed to register pause hotkey: %s", e)
 
 
 class ConfigError(Exception):
@@ -138,6 +179,8 @@ def ensure_gameplay(game_runner, extractor, action_delay, max_steps=60):
 
 def run_episode(episode, game_runner, agent, config, action_delay):
     """Run one episode; returns a metrics dict."""
+    global _is_paused, _emergency_stop_flag
+    
     max_actions = config.get('agent', {}).get('max_actions_per_episode', 500)
     startup_settle = config.get('agent', {}).get('startup_settle_ms', 60000) / 1000.0
     extractor = get_extractor()
@@ -147,8 +190,21 @@ def run_episode(episode, game_runner, agent, config, action_delay):
 
     logger.info("Episode %d start", episode)
     # Let the game settle after launch/menu before acting
-    logger.info("Waiting %d seconds for game to fully load...", int(startup_settle))
-    time.sleep(startup_settle)
+    logger.info("Waiting %.0f seconds for game to fully load...", startup_settle)
+    
+    # Countdown during startup with pause support
+    for i in range(int(startup_settle), 0, -1):
+        if _emergency_stop_flag:
+            logger.info("Episode %d aborted: emergency stop during startup", episode)
+            return {'outcome': 'aborted', 'reward': 0.0, 'actions': 0, 'damage_taken': 0.0}
+        if _is_paused:
+            logger.info("Startup paused...")
+            _pause_event.wait()  # Block until resumed
+            if _emergency_stop_flag:
+                return {'outcome': 'aborted', 'reward': 0.0, 'actions': 0, 'damage_taken': 0.0}
+        time.sleep(1)
+        logger.debug("Startup: %d seconds remaining", i)
+    
     if not ensure_gameplay(game_runner, extractor, action_delay):
         logger.info("Episode %d aborted: could not reach gameplay", episode)
         return {'outcome': 'no_gameplay', 'reward': 0.0, 'actions': 0,
@@ -161,6 +217,19 @@ def run_episode(episode, game_runner, agent, config, action_delay):
     outcome = 'timeout'
 
     while actions_taken < max_actions:
+        # Check for pause at each step
+        if _is_paused:
+            logger.info("Agent paused at step %d...", actions_taken)
+            _pause_event.wait()  # Block until resumed
+            logger.info("Agent resumed")
+            if _emergency_stop_flag:
+                outcome = 'aborted'
+                break
+        
+        if _emergency_stop_flag:
+            outcome = 'aborted'
+            break
+            
         features = extractor.extract(capture_and_analyze())
 
         if check_episode_end(features):
@@ -200,6 +269,8 @@ def run_episode(episode, game_runner, agent, config, action_delay):
 
 
 def main():
+    global _emergency_stop_flag
+    
     parser = argparse.ArgumentParser(description="Game playing agent for Hades")
     parser.add_argument('--mode', choices=['demo', 'train', 'test', 'eval'],
                         default='demo')
@@ -210,8 +281,8 @@ def main():
                         help="Eval policy baseline (default: learned Q-table)")
     parser.add_argument('--verbose', action='store_true',
                         help='Enable debug logging')
-    parser.add_argument('--emergency-key', type=str, default='ctrl+s',
-                        help="Key combo to emergency stop (default: ctrl+s)")
+    parser.add_argument('--pause-key', type=str, default='f12',
+                        help="Key to toggle pause (default: f12)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -248,19 +319,35 @@ def main():
     game_runner = get_game_runner(game_exe)
     action_delay = config['agent']['action_delay_ms'] / 1000
 
+    # Check if overlay is enabled
+    show_overlay = config.get('agent', {}).get('show_status_overlay', False)
+    
     title = config.get('game', {}).get('title', 'Hades')
     logger.info("Game Playing Agent for %s", title)
     logger.info("=" * 50)
     logger.info("Mode: %s | Baseline: %s", args.mode, args.baseline)
     logger.info("Episodes: %d", args.episodes)
     logger.info("Learning enabled: %s", agent.learning_enabled)
-    logger.info("Emergency stop key combo: %s", args.emergency_key)
-    logger.info("Press Ctrl+C or %s to emergency stop", args.emergency_key)
+    logger.info("Pause key: %s (press to toggle pause/resume)", args.pause_key)
+    logger.info("Press Ctrl+C for emergency stop")
+    logger.info("Status overlay: %s", "enabled" if show_overlay else "disabled")
     logger.info("=" * 50)
+
+    # Start status overlay if enabled
+    if show_overlay:
+        start_overlay()
+        logger.info("Status overlay started - shows RUNNING/PAUSED state")
 
     if not game_runner.launch():
         logger.error("Failed to launch game!")
+        if show_overlay:
+            stop_overlay()
         return
+
+    # Start pause listener in background thread
+    pause_thread = threading.Thread(target=listen_for_pause_key, 
+                                     args=(args.pause_key,), daemon=True)
+    pause_thread.start()
 
     results = []
     try:
@@ -275,11 +362,17 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user - triggering emergency stop")
+        _emergency_stop_flag = True
         game_runner.emergency_stop()
+        if show_overlay:
+            update_overlay_state(paused=False)
+            stop_overlay()
         if agent.learning_enabled:
             agent.save()
     finally:
         game_runner.shutdown()
+        if show_overlay:
+            stop_overlay()
 
 
 def log_summary(mode, episodes, agent, results):
