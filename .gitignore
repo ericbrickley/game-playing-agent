@@ -1,16 +1,30 @@
+```
 # Python
 __pycache__/
-*.py[cod]
-*.egg-info/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+.env
+.env.local
+.env.*
 
-# Test / tooling caches
+# Testing
 .pytest_cache/
 .coverage
+coverage/
 
-# Generated artifacts
-experiments/experiences.jsonl
-config/agent.json
+# Build artifacts
+build/
+dist/
+*.egg-info/
 
-# OS junk
-Thumbs.db
+# Logs
+*.log
+
+# OS
 .DS_Store
+Thumbs.db
+```

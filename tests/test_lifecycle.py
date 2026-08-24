@@ -104,9 +104,11 @@ def test_run_episode_timeout_metrics(monkeypatch):
     agent.policy[key] = {'W': 0.0, 'E': 0.0, 'SPACE': 1.0}
 
     config = {
-        'agent': {'max_actions_per_episode': 3, 'action_delay_ms': 0},
+        'agent': {'max_actions_per_episode': 3, 'action_delay_ms': 0,
+                  'startup_settle_ms': 0},
         'rewards': {'neutral': 0.0, 'time_penalty': 0.0,
-                    'health_delta_scale': 0.1, 'attack_hit': 0.5},
+                    'health_delta_scale': 0.1, 'attack_hit': 0.5,
+                    'unknown_health_penalty': 0.0},
         'actions': CONFIG['actions'],
     }
     metrics = main.run_episode(1, FakeRunner(), agent, config, 0.0)

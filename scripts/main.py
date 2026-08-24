@@ -72,6 +72,11 @@ def get_reward(config, features, action):
     delta = read_feature(features, 'health_delta')
     if delta is not None:
         total += r_cfg.get('health_delta_scale', 0.1) * float(delta)
+    else:
+        # Fallback: penalize being in combat with unknown health (risk signal)
+        scene = read_feature(features, 'scene')
+        if scene == 'combat' and read_feature(features, 'health_pct') is None:
+            total += r_cfg.get('unknown_health_penalty', -0.05)
 
     action_type = config.get('actions', {}).get(action, {}).get('type', '')
     if action_type == 'attack' and bool(read_feature(features, 'enemies_present')):
@@ -134,12 +139,15 @@ def ensure_gameplay(game_runner, extractor, action_delay, max_steps=60):
 def run_episode(episode, game_runner, agent, config, action_delay):
     """Run one episode; returns a metrics dict."""
     max_actions = config.get('agent', {}).get('max_actions_per_episode', 500)
+    startup_settle = config.get('agent', {}).get('startup_settle_ms', 3000) / 1000.0
     extractor = get_extractor()
     encoder = get_encoder()
     extractor.reset()
     game_runner.focus_window()
 
     logger.info("Episode %d start", episode)
+    # Let the game settle after launch/menu before acting
+    time.sleep(startup_settle)
     if not ensure_gameplay(game_runner, extractor, action_delay):
         logger.info("Episode %d aborted: could not reach gameplay", episode)
         return {'outcome': 'no_gameplay', 'reward': 0.0, 'actions': 0,
